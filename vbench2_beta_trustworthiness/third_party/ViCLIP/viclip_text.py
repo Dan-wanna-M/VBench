@@ -1,7 +1,13 @@
 import os
 import logging
 from collections import OrderedDict
-from pkg_resources import packaging
+try:
+    # Preferred import path with modern setuptools / Python 3.12.
+    from packaging import version as pkg_version
+except Exception:
+    # Backward compatibility for older environments.
+    from pkg_resources import packaging as _packaging
+    pkg_version = _packaging.version
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer
 
 import numpy as np
@@ -141,7 +147,7 @@ class CLIP_TEXT(nn.Module):
         sot_token = self._tokenizer.encoder["<|startoftext|>"]
         eot_token = self._tokenizer.encoder["<|endoftext|>"]
         all_tokens = [[sot_token] + self._tokenizer.encode(text) + [eot_token] for text in texts]
-        if packaging.version.parse(torch.__version__) < packaging.version.parse("1.8.0"):
+        if pkg_version.parse(torch.__version__) < pkg_version.parse("1.8.0"):
             result = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
         else:
             result = torch.zeros(len(all_tokens), context_length, dtype=torch.int)
@@ -268,4 +274,3 @@ def build_clip(config):
     model_cls = config.text_encoder.clip_teacher
     model = eval(model_cls)()
     return model
-
