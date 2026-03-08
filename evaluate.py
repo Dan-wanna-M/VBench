@@ -1,7 +1,7 @@
 import torch
 import os
 from vbench import VBench
-from vbench.distributed import dist_init, print0
+from vbench.distributed import dist_init, print0, get_rank, get_world_size
 from datetime import datetime
 import argparse
 import json
@@ -113,7 +113,13 @@ def main():
     
     print0(f'start evaluation')
 
-    current_time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
+    # Use one shared timestamp across all ranks, otherwise each rank can
+    # produce different filenames around second boundaries.
+    current_time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S') if get_rank() == 0 else None
+    if get_world_size() > 1:
+        ts_holder = [current_time]
+        torch.distributed.broadcast_object_list(ts_holder, src=0)
+        current_time = ts_holder[0]
 
     kwargs = {}
 
