@@ -5,7 +5,7 @@ import importlib
 from itertools import chain
 from pathlib import Path
 
-from .distributed import get_rank, print0  
+from .distributed import get_rank, print0, barrier  
 
 
 class VBench(object):
@@ -163,8 +163,11 @@ class VBench(object):
 
         
         cur_full_info_path = os.path.join(self.output_path, name+'_full_info.json')
-        save_json(cur_full_info_list, cur_full_info_path)
-        print0(f'Evaluation meta data saved to {cur_full_info_path}')
+        # Avoid concurrent writes from multiple distributed ranks.
+        if get_rank() == 0:
+            save_json(cur_full_info_list, cur_full_info_path)
+            print0(f'Evaluation meta data saved to {cur_full_info_path}')
+        barrier()
         return cur_full_info_path
 
 
