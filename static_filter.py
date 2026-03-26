@@ -115,7 +115,7 @@ def check_and_move(args, filter_results, target_path=None):
             logger.warning(f"Prompt: '{prompt}' has fewer than 5 filter results.")
         for i, video_path in enumerate(v["static_path"]):
             target_name = os.path.join(target_path, f"{prompt}-{i}.mp4")
-            shutil.copy(video_path, target_name)
+            shutil.copyfile(video_path, target_name)
     logger.info(f"All filtered videos are saved in the '{target_path}' path")
 
 def static_filter(args):
