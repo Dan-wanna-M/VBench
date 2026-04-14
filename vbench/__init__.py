@@ -1,11 +1,12 @@
 import os
+import traceback
 
 from .utils import get_prompt_from_filename, init_submodules, save_json, load_json
 import importlib
 from itertools import chain
 from pathlib import Path
 
-from .distributed import get_rank, print0, barrier  
+from .distributed import get_rank, print0, barrier
 
 
 class VBench(object):
@@ -187,7 +188,11 @@ class VBench(object):
                 raise NotImplementedError(f'UnImplemented dimension {dimension}!, {e}')
             submodules_list = submodules_dict[dimension]
             print0(f'cur_full_info_path: {cur_full_info_path}') # TODO: to delete
-            results = evaluate_func(cur_full_info_path, self.device, submodules_list, **kwargs)
+            try:
+                results = evaluate_func(cur_full_info_path, self.device, submodules_list, **kwargs)
+            except Exception as e:
+                print(f'[rank {get_rank()}] ERROR during {dimension}:\n{traceback.format_exc()}', flush=True)
+                raise
             results_dict[dimension] = results
         output_name = os.path.join(self.output_path, name+'_eval_results.json')
         if get_rank() == 0:
