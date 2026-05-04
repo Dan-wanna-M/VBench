@@ -5,6 +5,8 @@ import importlib
 from pathlib import Path
 from itertools import chain
 
+from vbench.distributed import get_rank, barrier
+
 from vbench2_beta_long.utils import split_video_into_scenes, split_video_into_clips, load_clip_lengths, get_duration_from_json
 
 class VBenchCompetition(VBench):
@@ -48,11 +50,13 @@ class VBenchCompetition(VBench):
 
         
         cur_full_info_path = os.path.join(self.output_path, name+'_full_info.json')
-        save_json(cur_full_info_list, cur_full_info_path)
-        print(f'Evaluation meta data saved to {cur_full_info_path}')
+        if get_rank() == 0:
+            save_json(cur_full_info_list, cur_full_info_path)
+            print(f'Evaluation meta data saved to {cur_full_info_path}')
+        barrier()  # all ranks wait for rank 0 to write before anyone reads it
         return cur_full_info_path
-    
-    
+
+
     def evaluate(self, videos_path, name, prompt_list=[], dimension_list=None, local=False, read_frame=False, **kwargs):
         results_dict = {}
         
@@ -88,9 +92,10 @@ class VBenchCompetition(VBench):
                 weighted_score = (1.0 * dim_results["overall_consistency"][0] + 1.0 * dim_results["clip_score"][0]) / 2.0
             
             results_dict[dimension_key] = [weighted_score, dim_results]
-                
-        output_name = os.path.join(self.output_path, name+'_eval_results.json')
-        save_json(results_dict, output_name)
+
+        if get_rank() == 0:
+            output_name = os.path.join(self.output_path, name+'_eval_results.json')
+            save_json(results_dict, output_name)
 
 
     #### VBench Long

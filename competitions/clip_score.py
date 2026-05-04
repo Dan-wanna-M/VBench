@@ -7,6 +7,12 @@ import torch.nn.functional as F
 
 from vbench2_beta_long.utils import reorganize_clips_results
 from vbench.utils import load_dimension_info, clip_transform, read_frames_decord_by_fps
+from vbench.distributed import (
+    get_world_size,
+    get_rank,
+    distribute_list_to_rank,
+    gather_list_of_dict,
+)
 import logging
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -45,12 +51,16 @@ def clip_alignment(clip_model, video_dict, preprocess, device):
 
 
 def compute_clip_score(json_dir, device, submodules_list, **kwargs):
-    
+
     clip_model, preprocess = clip.load("ViT-B/32", device=device)
     logger.info("Initialize CLIP success")
-    
+
     _, video_dict = load_dimension_info(json_dir, dimension='clip_score', lang='en')
+    video_dict = distribute_list_to_rank(video_dict)
     all_results, video_results = clip_alignment(clip_model, video_dict, preprocess, device)
+    if get_world_size() > 1:
+        video_results = gather_list_of_dict(video_results)
+        all_results = sum([d['video_results'] for d in video_results]) / len(video_results)
     return all_results, video_results
 
 

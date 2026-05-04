@@ -37,9 +37,18 @@ def main() -> None:
     sys.path.insert(0, str(vbench_root))
     sys.path.insert(0, str(vbench_root / "competitions"))
     from competitions import VBenchCompetition
+    from vbench.distributed import dist_init, get_rank, barrier
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args.output_path.mkdir(parents=True, exist_ok=True)
+    # Initialize distributed process group (sets up NCCL when running under
+    # torchrun; falls back to WORLD_SIZE=1 single-rank group otherwise).
+    dist_init()
+
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+
+    if get_rank() == 0:
+        args.output_path.mkdir(parents=True, exist_ok=True)
+    barrier()  # ensure output dir exists before any rank writes into it
 
     prompt_list: list[str] = []
     if args.prompt_file is not None:
@@ -53,7 +62,14 @@ def main() -> None:
         prompt_list = [prompt_map[Path(v).name] for v in sorted_videos]
 
     bench = VBenchCompetition(device, None, str(args.output_path))
-    current_time = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+
+    # All ranks must use the same name so they all look up the same
+    # full_info JSON written by rank 0 in build_full_info_json.
+    import torch.distributed as _dist
+    current_time_list = [datetime.now().strftime("%Y-%m-%d-%H:%M:%S")]
+    if _dist.is_initialized():
+        _dist.broadcast_object_list(current_time_list, src=0)
+    current_time = current_time_list[0]
 
     bench.evaluate(
         videos_path=str(args.videos_path),
@@ -61,7 +77,8 @@ def main() -> None:
         prompt_list=prompt_list,
         dimension_list=["text_alignment"],
     )
-    print(f"[text_alignment] Saved to {args.output_path}")
+    if get_rank() == 0:
+        print(f"[text_alignment] Saved to {args.output_path}")
 
 
 if __name__ == "__main__":
