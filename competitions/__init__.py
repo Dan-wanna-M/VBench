@@ -1,6 +1,7 @@
 import os
 from vbench import VBench
 from vbench.utils import init_submodules, save_json, get_prompt_from_filename, load_json
+from vbench.distributed import get_rank, print0, barrier
 import importlib
 from pathlib import Path
 from itertools import chain
@@ -48,8 +49,10 @@ class VBenchCompetition(VBench):
 
         
         cur_full_info_path = os.path.join(self.output_path, name+'_full_info.json')
-        save_json(cur_full_info_list, cur_full_info_path)
-        print(f'Evaluation meta data saved to {cur_full_info_path}')
+        if get_rank() == 0:
+            save_json(cur_full_info_list, cur_full_info_path)
+            print0(f'Evaluation meta data saved to {cur_full_info_path}')
+        barrier()
         return cur_full_info_path
     
     
@@ -90,7 +93,8 @@ class VBenchCompetition(VBench):
             results_dict[dimension_key] = [weighted_score, dim_results]
                 
         output_name = os.path.join(self.output_path, name+'_eval_results.json')
-        save_json(results_dict, output_name)
+        if get_rank() == 0:
+            save_json(results_dict, output_name)
 
 
     #### VBench Long
@@ -188,8 +192,9 @@ class VBenchCompetition(VBench):
             
             
         output_name = os.path.join(self.output_path, name+'_eval_results.json')
-        save_json(results_dict, output_name)
-        print(f'Evaluation results saved to {output_name}')
+        if get_rank() == 0:
+            save_json(results_dict, output_name)
+            print0(f'Evaluation results saved to {output_name}')
 
 
     def build_full_info_json_long(self, videos_path, name, dimension_list, prompt_list=[], **kwargs):
@@ -227,6 +232,8 @@ class VBenchCompetition(VBench):
                 video_info["prompt_en"] = video_map[video_info["prompt_en"].split("_")[0]]       
 
         cur_full_info_path = os.path.join(self.output_path, name+'_full_info.json')
-        save_json(cur_full_info_list, cur_full_info_path)
-        print(f'Evaluation meta data saved to {cur_full_info_path}')
+        if get_rank() == 0:
+            save_json(cur_full_info_list, cur_full_info_path)
+            print0(f'Evaluation meta data saved to {cur_full_info_path}')
+        barrier()
         return cur_full_info_path

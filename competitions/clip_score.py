@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from vbench2_beta_long.utils import reorganize_clips_results
 from vbench.utils import load_dimension_info, clip_transform, read_frames_decord_by_fps
+from vbench.distributed import get_rank, get_world_size, distribute_list_to_rank, gather_list_of_dict
 import logging
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def clip_alignment(clip_model, video_dict, preprocess, device):
     video_results = []
     
     image_transform = clip_transform(224)
-    for info in tqdm(video_dict):
+    for info in tqdm(video_dict, disable=get_rank() > 0):
         
         query = info["prompt"]
         text = clip.tokenize([query], truncate=True).to(device)
@@ -39,7 +40,7 @@ def clip_alignment(clip_model, video_dict, preprocess, device):
 
                 video_results.append({'video_path': video_path, 'video_results': video_sim})
     
-    avg_sim = np.mean(sim)
+    avg_sim = np.mean(sim) if sim else float("nan")
     
     return avg_sim, video_results
 
@@ -50,7 +51,11 @@ def compute_clip_score(json_dir, device, submodules_list, **kwargs):
     logger.info("Initialize CLIP success")
     
     _, video_dict = load_dimension_info(json_dir, dimension='clip_score', lang='en')
+    video_dict = distribute_list_to_rank(video_dict)
     all_results, video_results = clip_alignment(clip_model, video_dict, preprocess, device)
+    if get_world_size() > 1:
+        video_results = gather_list_of_dict(video_results)
+        all_results = np.mean([r["video_results"] for r in video_results]) if video_results else float("nan")
     return all_results, video_results
 
 

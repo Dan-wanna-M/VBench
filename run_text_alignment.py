@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+from vbench.distributed import dist_init, get_rank, get_world_size
 
 
 def main() -> None:
@@ -31,6 +32,9 @@ def main() -> None:
         help="JSON file mapping video filename -> prompt (used to build sorted prompt list)",
     )
     args = parser.parse_args()
+
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        dist_init()
 
     # Import VBenchCompetition (available because VBench is installed in this venv)
     vbench_root = Path(__file__).resolve().parent
@@ -53,7 +57,11 @@ def main() -> None:
         prompt_list = [prompt_map[Path(v).name] for v in sorted_videos]
 
     bench = VBenchCompetition(device, None, str(args.output_path))
-    current_time = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+    current_time = datetime.now().strftime("%Y-%m-%d-%H:%M:%S") if get_rank() == 0 else None
+    if get_world_size() > 1:
+        ts_holder = [current_time]
+        torch.distributed.broadcast_object_list(ts_holder, src=0)
+        current_time = ts_holder[0]
 
     bench.evaluate(
         videos_path=str(args.videos_path),
@@ -61,7 +69,8 @@ def main() -> None:
         prompt_list=prompt_list,
         dimension_list=["text_alignment"],
     )
-    print(f"[text_alignment] Saved to {args.output_path}")
+    if get_rank() == 0:
+        print(f"[text_alignment] Saved to {args.output_path}")
 
 
 if __name__ == "__main__":

@@ -209,6 +209,12 @@ def parse_args():
         help="""Denote the current state of pipeline
         """,
     )
+    parser.add_argument(
+        "--preprocess_only",
+        action="store_true",
+        help="""Only split long videos into clips, then exit before metric evaluation.
+        """,
+    )
 
     args = parser.parse_args()
     return args
@@ -265,6 +271,11 @@ def main():
     kwargs['bg_mapping_file_path'] = args.background_mapping_file_path
     kwargs['num_of_samples_per_prompt'] = args.num_of_samples_per_prompt
     kwargs['static_filter_flag'] = args.static_filter_flag
+
+    if args.preprocess_only:
+        my_VBench.preprocess(args.videos_path, args.mode, **kwargs)
+        print('preprocess done')
+        return
 
     my_VBench.evaluate(
         videos_path = args.videos_path,
