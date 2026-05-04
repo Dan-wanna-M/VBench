@@ -41,9 +41,18 @@ def main() -> None:
     sys.path.insert(0, str(vbench_root))
     sys.path.insert(0, str(vbench_root / "competitions"))
     from competitions import VBenchCompetition
+    from vbench.distributed import dist_init, get_rank, barrier
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args.output_path.mkdir(parents=True, exist_ok=True)
+    # Initialize distributed process group (sets up NCCL when running under
+    # torchrun; falls back to WORLD_SIZE=1 single-rank group otherwise).
+    dist_init()
+
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+
+    if get_rank() == 0:
+        args.output_path.mkdir(parents=True, exist_ok=True)
+    barrier()  # ensure output dir exists before any rank writes into it
 
     prompt_list: list[str] = []
     if args.prompt_file is not None:

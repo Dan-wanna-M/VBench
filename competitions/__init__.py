@@ -6,6 +6,8 @@ import importlib
 from pathlib import Path
 from itertools import chain
 
+from vbench.distributed import get_rank, barrier
+
 from vbench2_beta_long.utils import split_video_into_scenes, split_video_into_clips, load_clip_lengths, get_duration_from_json
 
 class VBenchCompetition(VBench):
@@ -54,8 +56,8 @@ class VBenchCompetition(VBench):
             print0(f'Evaluation meta data saved to {cur_full_info_path}')
         barrier()
         return cur_full_info_path
-    
-    
+
+
     def evaluate(self, videos_path, name, prompt_list=[], dimension_list=None, local=False, read_frame=False, **kwargs):
         results_dict = {}
         

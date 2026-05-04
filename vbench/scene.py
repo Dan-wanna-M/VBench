@@ -13,7 +13,6 @@ from .distributed import (
     get_world_size,
     get_rank,
     all_gather,
-    barrier,
     distribute_list_to_rank,
     gather_list_of_dict,
 )
@@ -64,22 +63,9 @@ def scene(model, video_dict, device):
         
 
 def compute_scene(json_dir, device, submodules_dict, **kwargs):
-    # Load rank 0 first so that the bert-base-uncased HuggingFace download (if
-    # not yet cached) completes before the other ranks attempt concurrent fetches.
-    if get_world_size() > 1:
-        if get_rank() == 0:
-            model = tag2text_caption(**submodules_dict)
-            model.eval()
-            model = model.to(device)
-        barrier()
-        if get_rank() != 0:
-            model = tag2text_caption(**submodules_dict)
-            model.eval()
-            model = model.to(device)
-    else:
-        model = tag2text_caption(**submodules_dict)
-        model.eval()
-        model = model.to(device)
+    model = tag2text_caption(**submodules_dict)
+    model.eval()
+    model = model.to(device)
     logger.info("Initialize caption model success")
     _, prompt_dict_ls = load_dimension_info(json_dir, dimension='scene', lang='en')
     prompt_dict_ls = distribute_list_to_rank(prompt_dict_ls)
