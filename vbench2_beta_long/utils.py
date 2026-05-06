@@ -132,7 +132,7 @@ def save_segment(frames, fps, save_path):
     write_video(save_path, frames, fps=fps)
     print(f"Video saved to {save_path}")
 
-def split_video_into_clips(video_path, output_path, duration=2, fps=8):
+def split_video_into_clips(video_path, output_path, duration=2, fps=8, verbose=True):
 
     first_video_properties = get_video_properties(video_path)
     if not first_video_properties:
@@ -151,11 +151,13 @@ def split_video_into_clips(video_path, output_path, duration=2, fps=8):
     os.makedirs(output_dir, exist_ok=True)
 
     if len(frames) < segment_frame_count:
-        print("Video is too short to be split. Saving the full video instead.")
+        if verbose:
+            print("Video is too short to be split. Saving the full video instead.")
         frames = frames.permute(0, 2, 3, 1)
         save_path = os.path.join(output_dir, f"{video_name}_full.mp4")
         write_video(save_path, frames, fps=fps)
-        print(f"Saved the full video: {save_path}")
+        if verbose:
+            print(f"Saved the full video: {save_path}")
         return output_dir
 
     # Start splitting
@@ -171,7 +173,8 @@ def split_video_into_clips(video_path, output_path, duration=2, fps=8):
         save_path = os.path.join(output_dir, f"{video_name}_{segment_count:03d}.mp4")
 
         write_video(save_path, segment_frames, fps=fps)
-        print(f"Saved {save_path}")
+        if verbose:
+            print(f"Saved {save_path}")
         segment_count += 1
 
     # Handle the last segment if it's shorter than the expected duration
@@ -186,7 +189,8 @@ def split_video_into_clips(video_path, output_path, duration=2, fps=8):
 
         save_path = os.path.join(output_dir, f"{video_name}_{segment_count:03d}.mp4")
         write_video(save_path, extended_segment_frames, fps=fps)
-        print(f"Extended and saved the last segment: {save_path}")
+        if verbose:
+            print(f"Extended and saved the last segment: {save_path}")
 
     return output_dir
 

@@ -1,12 +1,51 @@
 import os
 import re
 import importlib
+import hashlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import chain
 from pathlib import Path
 from vbench.utils import get_prompt_from_filename, init_submodules, save_json, load_json
 from vbench2_beta_long.utils import split_video_into_scenes, split_video_into_clips, load_clip_lengths, get_duration_from_json
 from vbench2_beta_long.temporal_flickering import filter_static_clips
 from vbench import VBench
+
+
+DEFAULT_SPLIT_WORKERS = 64
+
+
+def _path_slug(path):
+    abs_path = os.path.abspath(path)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", os.path.basename(abs_path)) or "videos"
+    digest = hashlib.md5(abs_path.encode("utf-8")).hexdigest()[:8]
+    return f"{safe_name}-{digest}"
+
+
+def _resolve_split_clip_path(videos_path, kwargs):
+    split_clip_root = kwargs.get("split_clip_root", os.environ.get("VBENCH_SPLIT_CLIP_ROOT"))
+    if not split_clip_root:
+        return os.path.join(videos_path, "split_clip")
+    return os.path.join(split_clip_root, _path_slug(videos_path), "split_clip")
+
+
+def _resolve_split_workers(kwargs):
+    split_workers = kwargs.get("split_workers", os.environ.get("VBENCH_SPLIT_WORKERS", DEFAULT_SPLIT_WORKERS))
+    try:
+        split_workers = int(split_workers)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid split_workers value: {split_workers}")
+    return max(1, split_workers)
+
+
+def _split_video_task(task):
+    video_path, base_output_dir, duration = task
+    output_dir = split_video_into_clips(video_path, base_output_dir, int(duration), fps=8, verbose=False)
+    if output_dir is None:
+        raise RuntimeError(f"Failed to split video: {video_path}")
+    return {
+        "video_path": video_path,
+        "output_dir": output_dir,
+    }
 
 
 
@@ -18,9 +57,9 @@ class VBenchLong(VBench):
     def preprocess(self, videos_path, mode, threshold = 35.0, segment_length=16, duration=2, **kwargs):
         # static_filter_flag = (mode == 'long_vbench_standard' and (videos_path.split('/')[-1] == 'temporal_flickering' or 'temporal_flickering' in kwargs['preprocess_dimension_flag']))
         # static_filter_flag = kwargs['static_filter_flag']
-        if "split_clip" in os.listdir(videos_path):
+        split_clip_path = _resolve_split_clip_path(videos_path, kwargs)
+        if os.path.isdir(split_clip_path):
             # Get all folder names in the split_clip folder
-            split_clip_path=os.path.join(videos_path,"split_clip")
             split_clip_folders_count = len([folder for folder in os.listdir(split_clip_path) if re.search(r'-\d+$', folder)])
             
             # Get the number of files in the videos_path folder that end with '.mp4'
@@ -28,7 +67,7 @@ class VBenchLong(VBench):
             
             # Check if the number of folders matches the number of .mp4 files
             if split_clip_folders_count == mp4_files_count:
-                print(f"Videos have been splitted into clips in {videos_path}/split_clip")
+                print(f"Videos have been splitted into clips in {split_clip_path}")
                 return 
 
         # detect transistions
@@ -52,10 +91,11 @@ class VBenchLong(VBench):
         dimension_clip_length = load_clip_lengths(dimension_clip_length_config_path)
 
         # split video into clips
-        base_output_dir = os.path.join(videos_path, "split_clip")
+        base_output_dir = split_clip_path
         os.makedirs(base_output_dir, exist_ok=True)
 
-        for video_file in os.listdir(videos_path):
+        split_tasks = []
+        for video_file in sorted(os.listdir(videos_path)):
             video_path = os.path.join(videos_path, video_file)
 
             if not video_path.endswith(('.mp4', '.avi', '.mov')):
@@ -68,15 +108,34 @@ class VBenchLong(VBench):
             if video_path in split_scene_video_path:
                 video_name = os.path.splitext(video_file)[0]
                 video_scenes_path = os.path.join(os.path.dirname(video_path), "split_scene", video_name)
-                for video_scene_path in os.listdir(video_scenes_path):
+                for video_scene_path in sorted(os.listdir(video_scenes_path)):
                     video_scene_path = os.path.join(video_scenes_path, video_scene_path)
-                    split_video_into_clips(video_scene_path, base_output_dir, int(duration), fps=8)
+                    split_tasks.append((video_scene_path, base_output_dir, int(duration)))
 
             else:
-                split_video_into_clips(video_path, base_output_dir, int(duration), fps=8)
+                split_tasks.append((video_path, base_output_dir, int(duration)))
+
+        split_workers = _resolve_split_workers(kwargs)
+        total_tasks = len(split_tasks)
+        print(f"Splitting {total_tasks} videos into clips in {base_output_dir} with {split_workers} worker(s)")
+
+        if split_workers <= 1 or total_tasks <= 1:
+            for index, task in enumerate(split_tasks, start=1):
+                result = _split_video_task(task)
+                print(f"[{index}/{total_tasks}] Split {result['video_path']} -> {result['output_dir']}")
+        else:
+            with ProcessPoolExecutor(max_workers=split_workers) as executor:
+                future_to_task = {executor.submit(_split_video_task, task): task for task in split_tasks}
+                for index, future in enumerate(as_completed(future_to_task), start=1):
+                    task = future_to_task[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        raise RuntimeError(f"Failed to split video {task[0]}") from exc
+                    print(f"[{index}/{total_tasks}] Split {result['video_path']} -> {result['output_dir']}")
 
         # finally, got floders under videos_path, which contain clips of each video
-        print(f"Splitting videos into clips in {base_output_dir}")
+        print(f"Finished splitting videos into clips in {base_output_dir}")
 
 
     def evaluate(self, videos_path, name, prompt_list=[], dimension_list=None, local=False, read_frame=False, mode='vbench_standard', **kwargs):
@@ -203,6 +262,7 @@ class VBenchLong(VBench):
             # if kwargs['static_filter_flag'] and 'temporal_flickering' in dimension_list:
             #     videos_path = os.path.join(videos_path, 'temporal_filtered_cilps', 'filtered_videos')
             full_info_list = load_json(self.full_info_dir)
+            split_clip_path = _resolve_split_clip_path(videos_path, kwargs)
             video_names = os.listdir(videos_path)
             postfix = Path(video_names[0]).suffix
             video_clip_folder_names = [name.replace(postfix, '') for name in video_names]
@@ -214,7 +274,7 @@ class VBenchLong(VBench):
                     for i in range(kwargs['num_of_samples_per_prompt']): # video index for the same prompt
                         intended_video_name = f'{prompt}{special_str}-{str(i)}{postfix}'
                         intended_video_name_floder = f'{prompt}{special_str}-{str(i)}'
-                        intended_video_clips_name_floder = os.path.join(videos_path, "split_clip", intended_video_name_floder)
+                        intended_video_clips_name_floder = os.path.join(split_clip_path, intended_video_name_floder)
 
                         if not os.path.exists(intended_video_clips_name_floder):
                             print(f'WARNING!!! This required video clips are not found! Missing benchmark videos can lead to unfair evaluation result. The missing video clips folder is: {intended_video_clips_name_floder}')
@@ -231,7 +291,7 @@ class VBenchLong(VBench):
             cur_full_info_dict = {} # to save the prompt and video path info for the current dimensions
 
             # get splitted video paths
-            splited_videos_path = os.path.join(videos_path, 'split_clip')
+            splited_videos_path = _resolve_split_clip_path(videos_path, kwargs)
 
             
             for prompt_folder in os.listdir(splited_videos_path):

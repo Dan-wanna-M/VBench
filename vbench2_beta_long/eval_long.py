@@ -201,6 +201,23 @@ def parse_args():
         help="""Number of samples for each prompt, i.e. prompt-index.mp4
         """,
     )
+    parser.add_argument(
+        "--split_workers",
+        type=int,
+        default=None,
+        help="""Number of worker processes for long-video clip splitting.
+        Defaults to VBENCH_SPLIT_WORKERS when set, otherwise 64. Use 1 for serial splitting.
+        """,
+    )
+    parser.add_argument(
+        "--split_clip_root",
+        type=str,
+        default=None,
+        help="""Optional local root for long-video split clips.
+        When set, clips are written to <split_clip_root>/<videos_path slug>/split_clip.
+        Defaults to VBENCH_SPLIT_CLIP_ROOT when set, otherwise <videos_path>/split_clip.
+        """,
+    )
 
     # for dev branch
     parser.add_argument(
@@ -271,6 +288,10 @@ def main():
     kwargs['bg_mapping_file_path'] = args.background_mapping_file_path
     kwargs['num_of_samples_per_prompt'] = args.num_of_samples_per_prompt
     kwargs['static_filter_flag'] = args.static_filter_flag
+    if args.split_workers is not None:
+        kwargs['split_workers'] = args.split_workers
+    if args.split_clip_root is not None:
+        kwargs['split_clip_root'] = args.split_clip_root
 
     if args.preprocess_only:
         my_VBench.preprocess(args.videos_path, args.mode, **kwargs)
