@@ -7,7 +7,7 @@ import torch
 from tqdm import tqdm
 from easydict import EasyDict as edict
 
-from vbench.utils import load_dimension_info
+from vbench.utils import get_truncate_seconds, load_dimension_info, truncated_frame_count
 
 from vbench.third_party.RAFT.core.raft import RAFT
 from vbench.third_party.RAFT.core.utils_core.utils import InputPadder
@@ -61,10 +61,10 @@ class DynamicDegree:
         self.params = {"thres":6.0*(scale/256.0), "count_num":round(4*(count/16.0))}
 
 
-    def infer(self, video_path):
+    def infer(self, video_path, truncate_seconds=None):
         with torch.no_grad():
             if video_path.endswith('.mp4'):
-                frames = self.get_frames(video_path)
+                frames = self.get_frames(video_path, truncate_seconds=truncate_seconds)
             elif os.path.isdir(video_path):
                 frames = self.get_frames_from_img_folder(video_path)
             else:
@@ -93,10 +93,11 @@ class DynamicDegree:
         return False
 
 
-    def get_frames(self, video_path):
+    def get_frames(self, video_path, truncate_seconds=None):
         frame_list = []
         video = cv2.VideoCapture(video_path)
         fps = video.get(cv2.CAP_PROP_FPS) # get fps
+        max_frames = truncated_frame_count(fps, truncate_seconds)
         interval = max(1, round(fps / 8))
         while video.isOpened():
             success, frame = video.read()
@@ -105,6 +106,8 @@ class DynamicDegree:
                 frame = torch.from_numpy(frame.astype(np.uint8)).permute(2, 0, 1).float()
                 frame = frame[None].to(self.device)
                 frame_list.append(frame)
+                if max_frames is not None and len(frame_list) >= max_frames:
+                    break
             else:
                 break
         video.release()
@@ -138,11 +141,11 @@ class DynamicDegree:
 
 
 
-def dynamic_degree(dynamic, video_list):
+def dynamic_degree(dynamic, video_list, truncate_seconds=None):
     sim = []
     video_results = []
     for video_path in tqdm(video_list, disable=get_rank() > 0):
-        score_per_video = dynamic.infer(video_path)
+        score_per_video = dynamic.infer(video_path, truncate_seconds=truncate_seconds)
         video_results.append({'video_path': video_path, 'video_results': score_per_video})
         sim.append(score_per_video)
     avg_score = np.mean(sim)
@@ -157,7 +160,7 @@ def compute_dynamic_degree(json_dir, device, submodules_list, **kwargs):
     dynamic = DynamicDegree(args_new, device)
     video_list, _ = load_dimension_info(json_dir, dimension='dynamic_degree', lang='en')
     video_list = distribute_list_to_rank(video_list)
-    all_results, video_results = dynamic_degree(dynamic, video_list)
+    all_results, video_results = dynamic_degree(dynamic, video_list, truncate_seconds=get_truncate_seconds(kwargs))
     if get_world_size() > 1:
         video_results = gather_list_of_dict(video_results)
         all_results = sum([d['video_results'] for d in video_results]) / len(video_results)

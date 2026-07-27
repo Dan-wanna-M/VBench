@@ -6,13 +6,13 @@ import torch
 import torch.nn.functional as F
 
 from vbench2_beta_long.utils import reorganize_clips_results
-from vbench.utils import load_dimension_info, clip_transform, read_frames_decord_by_fps
+from vbench.utils import load_dimension_info, clip_transform, read_frames_decord_by_fps, get_truncate_seconds
 from vbench.distributed import get_rank, get_world_size, distribute_list_to_rank, gather_list_of_dict
 import logging
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def clip_alignment(clip_model, video_dict, preprocess, device):
+def clip_alignment(clip_model, video_dict, preprocess, device, truncate_seconds=None):
     sim = []
     video_results = []
     
@@ -27,7 +27,12 @@ def clip_alignment(clip_model, video_dict, preprocess, device):
         video_list = info["video_list"]
         for video_path in video_list:
             with torch.no_grad():
-                images = read_frames_decord_by_fps(video_path, num_frames=8, sample="middle")
+                images = read_frames_decord_by_fps(
+                    video_path,
+                    num_frames=8,
+                    sample="middle",
+                    truncate_seconds=truncate_seconds,
+                )
                 images = image_transform(images)
                 images = images.to(device)
                 
@@ -52,7 +57,13 @@ def compute_clip_score(json_dir, device, submodules_list, **kwargs):
 
     _, video_dict = load_dimension_info(json_dir, dimension='clip_score', lang='en')
     video_dict = distribute_list_to_rank(video_dict)
-    all_results, video_results = clip_alignment(clip_model, video_dict, preprocess, device)
+    all_results, video_results = clip_alignment(
+        clip_model,
+        video_dict,
+        preprocess,
+        device,
+        truncate_seconds=get_truncate_seconds(kwargs),
+    )
     if get_world_size() > 1:
         video_results = gather_list_of_dict(video_results)
         all_results = sum([d['video_results'] for d in video_results]) / len(video_results)

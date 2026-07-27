@@ -6,6 +6,9 @@ from datetime import datetime
 import argparse
 import json
 
+if os.environ.get("VBENCH_TORCH_HUB_DIR"):
+    torch.hub.set_dir(os.environ["VBENCH_TORCH_HUB_DIR"])
+
 def parse_args():
 
     CUR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -99,12 +102,25 @@ def parse_args():
         4. 'None': no preprocessing
         """,
     )
+    parser.add_argument(
+        "--truncate_seconds",
+        type=float,
+        default=None,
+        help="If set, evaluate only the first N seconds of each video while decoding.",
+    )
     args = parser.parse_args()
     return args
 
 
 def main():
     args = parse_args()
+
+    kwargs = {}
+    if args.truncate_seconds is not None:
+        if args.truncate_seconds <= 0:
+            raise ValueError("--truncate_seconds must be > 0")
+        kwargs['truncate_seconds'] = args.truncate_seconds
+        os.environ["VBENCH_TRUNCATE_SECONDS"] = f"{args.truncate_seconds:g}"
 
     dist_init()
     print0(f'args: {args}')
@@ -120,8 +136,6 @@ def main():
         ts_holder = [current_time]
         torch.distributed.broadcast_object_list(ts_holder, src=0)
         current_time = ts_holder[0]
-
-    kwargs = {}
 
     prompt = []
 

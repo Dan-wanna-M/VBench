@@ -18,7 +18,10 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
-from vbench.distributed import dist_init, get_rank, get_world_size
+from vbench.distributed import barrier, dist_init, get_rank, get_world_size
+
+if os.environ.get("VBENCH_TORCH_HUB_DIR"):
+    torch.hub.set_dir(os.environ["VBENCH_TORCH_HUB_DIR"])
 
 
 def main() -> None:
@@ -31,17 +34,21 @@ def main() -> None:
         default=None,
         help="JSON file mapping video filename -> prompt (used to build sorted prompt list)",
     )
+    parser.add_argument(
+        "--truncate_seconds",
+        type=float,
+        default=None,
+        help="If set, evaluate only the first N seconds of each video while decoding.",
+    )
     args = parser.parse_args()
-
-    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
-        dist_init()
+    if args.truncate_seconds is not None and args.truncate_seconds <= 0:
+        raise ValueError("--truncate_seconds must be > 0")
 
     # Import VBenchCompetition (available because VBench is installed in this venv)
     vbench_root = Path(__file__).resolve().parent
     sys.path.insert(0, str(vbench_root))
     sys.path.insert(0, str(vbench_root / "competitions"))
     from competitions import VBenchCompetition
-    from vbench.distributed import dist_init, get_rank, barrier
 
     # Initialize distributed process group (sets up NCCL when running under
     # torchrun; falls back to WORLD_SIZE=1 single-rank group otherwise).
@@ -77,6 +84,7 @@ def main() -> None:
         name=f"results_{current_time}",
         prompt_list=prompt_list,
         dimension_list=["text_alignment"],
+        truncate_seconds=args.truncate_seconds,
     )
     if get_rank() == 0:
         print(f"[text_alignment] Saved to {args.output_path}")

@@ -13,7 +13,7 @@ import logging
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-from vbench.utils import CACHE_DIR, get_prompt_from_filename, load_json
+from vbench.utils import CACHE_DIR, get_prompt_from_filename, get_truncate_seconds, load_json, truncated_frame_count
 from vbench.third_party.RAFT.core.raft import RAFT
 from vbench.third_party.RAFT.core.utils_core.utils import InputPadder
 
@@ -93,6 +93,7 @@ class StaticFilter:
     def get_frames(self, video_path):
         frame_list = []
         video = cv2.VideoCapture(video_path)
+        max_frames = truncated_frame_count(video.get(cv2.CAP_PROP_FPS), get_truncate_seconds(vars(self.args)))
         while video.isOpened():
             success, frame = video.read()
             if success:
@@ -100,6 +101,8 @@ class StaticFilter:
                 frame = torch.from_numpy(frame.astype(np.uint8)).permute(2, 0, 1).float()
                 frame = frame[None].to(DEVICE)
                 frame_list.append(frame)
+                if max_frames is not None and len(frame_list) >= max_frames:
+                    break
             else:
                 break
         video.release()
@@ -115,7 +118,7 @@ def check_and_move(args, filter_results, target_path=None):
             logger.warning(f"Prompt: '{prompt}' has fewer than 5 filter results.")
         for i, video_path in enumerate(v["static_path"]):
             target_name = os.path.join(target_path, f"{prompt}-{i}.mp4")
-            shutil.copyfile(video_path, target_name)
+            os.symlink(video_path, target_name)
     logger.info(f"All filtered videos are saved in the '{target_path}' path")
 
 def static_filter(args):
@@ -177,7 +180,10 @@ def parse_args():
         3. '$filename': if a filepath to a JSON file is provided, only the filename exists in JSON file will be filtered.
                 >       usage: --filter_scope example.json
     ''')
+    parser.add_argument('--truncate_seconds', type=float, default=None, help='Evaluate only the first N seconds while decoding videos')
     args = parser.parse_args()
+    if args.truncate_seconds is not None and args.truncate_seconds <= 0:
+        raise ValueError("--truncate_seconds must be > 0")
     return args
 
 if __name__ == "__main__":

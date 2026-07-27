@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 import cv2
-from vbench.utils import load_dimension_info
+from vbench.utils import get_truncate_seconds, load_dimension_info, truncated_frame_count
 
 from .distributed import (
     get_world_size,
@@ -13,13 +13,16 @@ from .distributed import (
 )
 
 
-def get_frames(video_path):
+def get_frames(video_path, truncate_seconds=None):
         frames = []
         video = cv2.VideoCapture(video_path)
+        max_frames = truncated_frame_count(video.get(cv2.CAP_PROP_FPS), truncate_seconds)
         while video.isOpened():
             success, frame = video.read()
             if success:
                 frames.append(frame)
+                if max_frames is not None and len(frames) >= max_frames:
+                    break
             else:
                 break
         video.release()
@@ -42,19 +45,19 @@ def calculate_mae(img1, img2):
     return np.mean(cv2.absdiff(np.array(img1, dtype=np.float32), np.array(img2, dtype=np.float32)))
 
 
-def cal_score(video_path):
+def cal_score(video_path, truncate_seconds=None):
     """please ensure the video is static"""
-    frames = get_frames(video_path)
+    frames = get_frames(video_path, truncate_seconds=truncate_seconds)
     score_seq = mae_seq(frames)
     return (255.0 - np.mean(score_seq).item())/255.0
 
 
-def temporal_flickering(video_list):
+def temporal_flickering(video_list, truncate_seconds=None):
     sim = []
     video_results = []
     for video_path in tqdm(video_list, disable=get_rank() > 0):
         try:
-            score_per_video = cal_score(video_path)
+            score_per_video = cal_score(video_path, truncate_seconds=truncate_seconds)
         except AssertionError:
             continue
         video_results.append({'video_path': video_path, 'video_results': score_per_video})
@@ -66,12 +69,11 @@ def temporal_flickering(video_list):
 def compute_temporal_flickering(json_dir, device, submodules_list, **kwargs):
     video_list, _ = load_dimension_info(json_dir, dimension='temporal_flickering', lang='en')
     video_list = distribute_list_to_rank(video_list)
-    all_results, video_results = temporal_flickering(video_list)
+    all_results, video_results = temporal_flickering(video_list, truncate_seconds=get_truncate_seconds(kwargs))
     if get_world_size() > 1:
         video_results = gather_list_of_dict(video_results)
         all_results = sum([d['video_results'] for d in video_results]) / len(video_results)
     return all_results, video_results
-
 
 
 

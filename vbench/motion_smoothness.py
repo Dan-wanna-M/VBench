@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from omegaconf import OmegaConf
 
-from vbench.utils import load_dimension_info
+from vbench.utils import get_truncate_seconds, load_dimension_info, truncated_frame_count
 
 from vbench.third_party.amt.utils.utils import (
     img2tensor, tensor2img,
@@ -30,14 +30,17 @@ class FrameProcess:
         pass
 
 
-    def get_frames(self, video_path):
+    def get_frames(self, video_path, truncate_seconds=None):
         frame_list = []
         video = cv2.VideoCapture(video_path)
+        max_frames = truncated_frame_count(video.get(cv2.CAP_PROP_FPS), truncate_seconds)
         while video.isOpened():
             success, frame = video.read()
             if success:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # convert to rgb
                 frame_list.append(frame)
+                if max_frames is not None and len(frame_list) >= max_frames:
+                    break
             else:
                 break
         video.release()
@@ -108,11 +111,11 @@ class MotionSmoothness:
         self.fp = FrameProcess()
 
 
-    def motion_score(self, video_path):
+    def motion_score(self, video_path, truncate_seconds=None):
         iters = int(self.niters)
         # get inputs
         if video_path.endswith('.mp4'):
-            frames = self.fp.get_frames(video_path)
+            frames = self.fp.get_frames(video_path, truncate_seconds=truncate_seconds)
         elif os.path.isdir(video_path):
             frames = self.fp.get_frames_from_img_folder(video_path)
         else:
@@ -168,11 +171,11 @@ class MotionSmoothness:
 
 
 
-def motion_smoothness(motion, video_list):
+def motion_smoothness(motion, video_list, truncate_seconds=None):
     sim = []
     video_results = []
     for video_path in tqdm(video_list, disable=get_rank() > 0):
-        score_per_video = motion.motion_score(video_path)
+        score_per_video = motion.motion_score(video_path, truncate_seconds=truncate_seconds)
         video_results.append({'video_path': video_path, 'video_results': score_per_video})
         sim.append(score_per_video)
     avg_score = np.mean(sim)
@@ -185,7 +188,7 @@ def compute_motion_smoothness(json_dir, device, submodules_list, **kwargs):
     motion = MotionSmoothness(config, ckpt, device)
     video_list, _ = load_dimension_info(json_dir, dimension='motion_smoothness', lang='en')
     video_list = distribute_list_to_rank(video_list)
-    all_results, video_results = motion_smoothness(motion, video_list)
+    all_results, video_results = motion_smoothness(motion, video_list, truncate_seconds=get_truncate_seconds(kwargs))
     if get_world_size() > 1:
         video_results = gather_list_of_dict(video_results)
         all_results = sum([d['video_results'] for d in video_results]) / len(video_results)

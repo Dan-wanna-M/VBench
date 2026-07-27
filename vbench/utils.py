@@ -30,6 +30,27 @@ from .distributed import (
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def get_truncate_seconds(kwargs=None):
+    truncate_seconds = None
+    if kwargs is not None:
+        truncate_seconds = kwargs.get('truncate_seconds')
+    if truncate_seconds is None:
+        truncate_seconds = os.environ.get('VBENCH_TRUNCATE_SECONDS')
+    if truncate_seconds in (None, ''):
+        return None
+    truncate_seconds = float(truncate_seconds)
+    if truncate_seconds <= 0:
+        raise ValueError(f"Invalid truncate_seconds value: {truncate_seconds}")
+    return truncate_seconds
+
+
+def truncated_frame_count(fps, truncate_seconds):
+    if truncate_seconds is None:
+        return None
+    if fps <= 0:
+        raise ValueError(f"Invalid FPS for truncation: {fps}")
+    return max(1, int(float(fps) * truncate_seconds))
+
 def clip_transform(n_px):
     return Compose([
         Resize(n_px, interpolation=BICUBIC, antialias=False),
@@ -105,7 +126,7 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
         raise ValueError
     return frame_indices
 
-def load_video(video_path, data_transform=None, num_frames=None, return_tensor=True, width=None, height=None):
+def load_video(video_path, data_transform=None, num_frames=None, return_tensor=True, width=None, height=None, truncate_seconds=None):
     """
     Load a video from a given path and apply optional data transformations.
 
@@ -151,10 +172,15 @@ def load_video(video_path, data_transform=None, num_frames=None, return_tensor=T
             video_reader = VideoReader(video_path, width=width, height=height, num_threads=1)
         else:
             video_reader = VideoReader(video_path, num_threads=1)
-        frame_indices = range(len(video_reader))
+        truncate_seconds = get_truncate_seconds({'truncate_seconds': truncate_seconds})
+        vlen = len(video_reader)
+        max_frames = truncated_frame_count(video_reader.get_avg_fps(), truncate_seconds)
+        if max_frames is not None:
+            vlen = min(vlen, max_frames)
+        frame_indices = range(vlen)
         if num_frames:
             frame_indices = get_frame_indices(
-            num_frames, len(video_reader), sample="middle"
+            num_frames, vlen, sample="middle"
             )
         frames = video_reader.get_batch(frame_indices)  # (T, H, W, C), torch.uint8
         buffer = frames.asnumpy().astype(np.uint8)
@@ -178,13 +204,17 @@ def load_video(video_path, data_transform=None, num_frames=None, return_tensor=T
 
 def read_frames_decord_by_fps(
         video_path, sample_fps=2, sample='rand', fix_start=None, 
-        max_num_frames=-1,  trimmed30=False, num_frames=8
+        max_num_frames=-1,  trimmed30=False, num_frames=8, truncate_seconds=None
     ):
     import decord
     decord.bridge.set_bridge("torch")
     video_reader = VideoReader(video_path, num_threads=1)
     vlen = len(video_reader)
     fps = video_reader.get_avg_fps()
+    truncate_seconds = get_truncate_seconds({'truncate_seconds': truncate_seconds})
+    max_frames = truncated_frame_count(fps, truncate_seconds)
+    if max_frames is not None:
+        vlen = min(vlen, max_frames)
     duration = vlen / float(fps)
 
     if trimmed30 and duration > 30:

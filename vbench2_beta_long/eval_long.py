@@ -7,6 +7,9 @@ from datetime import datetime
 import argparse
 import json
 
+if os.environ.get("VBENCH_TORCH_HUB_DIR"):
+    torch.hub.set_dir(os.environ["VBENCH_TORCH_HUB_DIR"])
+
 def parse_args():
 
     CUR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -218,6 +221,13 @@ def parse_args():
         Defaults to VBENCH_SPLIT_CLIP_ROOT when set, otherwise <videos_path>/split_clip.
         """,
     )
+    parser.add_argument(
+        "--truncate_seconds",
+        type=float,
+        default=None,
+        help="""Evaluate only the first N seconds of each long video by slicing decoded frames before clip splitting.
+        """,
+    )
 
     # for dev branch
     parser.add_argument(
@@ -234,11 +244,15 @@ def parse_args():
     )
 
     args = parser.parse_args()
+    if args.truncate_seconds is not None and args.truncate_seconds <= 0:
+        raise ValueError("--truncate_seconds must be > 0")
     return args
 
 
 def main():
     args = parse_args()
+    if args.truncate_seconds is not None:
+        os.environ["VBENCH_TRUNCATE_SECONDS"] = f"{args.truncate_seconds:g}"
     print(f'args: {args}')
 
     device = torch.device("cuda")
@@ -292,6 +306,8 @@ def main():
         kwargs['split_workers'] = args.split_workers
     if args.split_clip_root is not None:
         kwargs['split_clip_root'] = args.split_clip_root
+    if args.truncate_seconds is not None:
+        kwargs['truncate_seconds'] = args.truncate_seconds
 
     if args.preprocess_only:
         my_VBench.preprocess(args.videos_path, args.mode, **kwargs)

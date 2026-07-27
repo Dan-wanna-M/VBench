@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import clip
 from tqdm import tqdm
-from vbench.utils import load_video, load_dimension_info, clip_transform, read_frames_decord_by_fps, CACHE_DIR
+from vbench.utils import load_video, load_dimension_info, clip_transform, read_frames_decord_by_fps, CACHE_DIR, get_truncate_seconds
 from vbench.third_party.ViCLIP.viclip import ViCLIP
 from vbench.third_party.ViCLIP.simple_tokenizer import SimpleTokenizer
 
@@ -40,7 +40,7 @@ def get_predict_label(clip_feature, text_feats_tensor, top=5):
     top_probs, top_labels = label_probs.cpu().topk(top, dim=-1)
     return top_probs, top_labels
 
-def temporal_style(clip_model, video_dict, tokenizer, device, sample="middle"):
+def temporal_style(clip_model, video_dict, tokenizer, device, sample="middle", truncate_seconds=None):
     sim = []
     video_results = []
     image_transform = clip_transform(224)
@@ -52,7 +52,12 @@ def temporal_style(clip_model, video_dict, tokenizer, device, sample="middle"):
             cur_video = []
             with torch.no_grad():
                 # images = load_video(video_path, num_frames=8)
-                images = read_frames_decord_by_fps(video_path, num_frames=8, sample=sample)
+                images = read_frames_decord_by_fps(
+                    video_path,
+                    num_frames=8,
+                    sample=sample,
+                    truncate_seconds=truncate_seconds,
+                )
                 images = image_transform(images)
                 images = images.to(device)
                 clip_feat = get_vid_features(clip_model,images.unsqueeze(0))
@@ -69,7 +74,13 @@ def compute_temporal_style(json_dir, device, submodules_list, **kwargs):
     viclip = ViCLIP(tokenizer= tokenizer, **submodules_list).to(device)
     _, video_dict = load_dimension_info(json_dir, dimension='temporal_style', lang='en')
     video_dict = distribute_list_to_rank(video_dict)
-    all_results, video_results = temporal_style(viclip, video_dict, tokenizer, device)
+    all_results, video_results = temporal_style(
+        viclip,
+        video_dict,
+        tokenizer,
+        device,
+        truncate_seconds=get_truncate_seconds(kwargs),
+    )
     if get_world_size() > 1:
         video_results = gather_list_of_dict(video_results)
         all_results = sum([d['video_results'] for d in video_results]) / len(video_results)

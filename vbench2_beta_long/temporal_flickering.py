@@ -7,12 +7,13 @@ from collections import defaultdict
 from vbench.temporal_flickering import compute_temporal_flickering
 from vbench.utils import CACHE_DIR, save_json, load_json, load_dimension_info
 from vbench2_beta_long.utils import reorganize_clips_results, build_filtered_info_json
+from vbench2_beta_long.utils import split_clip_root_from_path
 from vbench2_beta_long.static_filter import static_filter
 
 def compute_long_temporal_flickering(json_dir, device, submodules_list, **kwargs):
     video_list, _ = load_dimension_info(json_dir, dimension='temporal_flickering', lang='en')
-    base_video_path = os.path.dirname(video_list[0]).split('split_clip')[0]
-    video_clips_path = os.path.join(base_video_path, "split_clip")
+    video_clips_path = split_clip_root_from_path(video_list[0])
+    base_video_path = os.path.dirname(video_clips_path)
 
     output_path = os.path.join(base_video_path, "temporal_filtered_cilps")
     os.makedirs(output_path, exist_ok=True)

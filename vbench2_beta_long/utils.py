@@ -31,6 +31,13 @@ from scenedetect.video_splitter import split_video_ffmpeg
 from moviepy.editor import VideoFileClip
 from scipy.stats import rankdata
 
+def split_clip_root_from_path(video_path):
+    parts = Path(video_path).parts
+    for idx, part in enumerate(parts):
+        if part.startswith("split_clip"):
+            return str(Path(*parts[:idx + 1]))
+    raise ValueError(f"Could not find split_clip root in path: {video_path}")
+
 ###################################################################################################
 # Consistency Dimensions' Score Distribution Transformation
 
@@ -132,7 +139,7 @@ def save_segment(frames, fps, save_path):
     write_video(save_path, frames, fps=fps)
     print(f"Video saved to {save_path}")
 
-def split_video_into_clips(video_path, output_path, duration=2, fps=8, verbose=True):
+def split_video_into_clips(video_path, output_path, duration=2, fps=8, verbose=True, truncate_seconds=None):
 
     first_video_properties = get_video_properties(video_path)
     if not first_video_properties:
@@ -143,6 +150,13 @@ def split_video_into_clips(video_path, output_path, duration=2, fps=8, verbose=T
 
     # Load video frames
     frames = load_video(video_path, return_tensor=True)
+    if truncate_seconds is not None:
+        if truncate_seconds <= 0:
+            raise ValueError(f"Invalid truncate_seconds value: {truncate_seconds}")
+        max_frames = max(1, int(fps * truncate_seconds))
+        frames = frames[:max_frames]
+        if verbose:
+            print(f"Truncated {video_path} to {len(frames)} frames ({truncate_seconds:g}s requested)")
     segment_frame_count = fps * duration  # Calculate the number of frames per segment
 
     

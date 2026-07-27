@@ -21,11 +21,20 @@ def _path_slug(path):
     return f"{safe_name}-{digest}"
 
 
+def _truncate_suffix(kwargs):
+    truncate_seconds = kwargs.get("truncate_seconds")
+    if truncate_seconds is None:
+        return ""
+    label = f"{float(truncate_seconds):g}".replace(".", "p")
+    return f"_trunc{label}s"
+
+
 def _resolve_split_clip_path(videos_path, kwargs):
     split_clip_root = kwargs.get("split_clip_root", os.environ.get("VBENCH_SPLIT_CLIP_ROOT"))
+    split_clip_name = f"split_clip{_truncate_suffix(kwargs)}"
     if not split_clip_root:
-        return os.path.join(videos_path, "split_clip")
-    return os.path.join(split_clip_root, _path_slug(videos_path), "split_clip")
+        return os.path.join(videos_path, split_clip_name)
+    return os.path.join(split_clip_root, _path_slug(videos_path), split_clip_name)
 
 
 def _resolve_split_workers(kwargs):
@@ -38,8 +47,15 @@ def _resolve_split_workers(kwargs):
 
 
 def _split_video_task(task):
-    video_path, base_output_dir, duration = task
-    output_dir = split_video_into_clips(video_path, base_output_dir, int(duration), fps=8, verbose=False)
+    video_path, base_output_dir, duration, truncate_seconds = task
+    output_dir = split_video_into_clips(
+        video_path,
+        base_output_dir,
+        int(duration),
+        fps=8,
+        verbose=False,
+        truncate_seconds=truncate_seconds,
+    )
     if output_dir is None:
         raise RuntimeError(f"Failed to split video: {video_path}")
     return {
@@ -57,6 +73,9 @@ class VBenchLong(VBench):
     def preprocess(self, videos_path, mode, threshold = 35.0, segment_length=16, duration=2, **kwargs):
         # static_filter_flag = (mode == 'long_vbench_standard' and (videos_path.split('/')[-1] == 'temporal_flickering' or 'temporal_flickering' in kwargs['preprocess_dimension_flag']))
         # static_filter_flag = kwargs['static_filter_flag']
+        truncate_seconds = kwargs.get("truncate_seconds")
+        if truncate_seconds is not None and truncate_seconds <= 0:
+            raise ValueError(f"Invalid truncate_seconds value: {truncate_seconds}")
         split_clip_path = _resolve_split_clip_path(videos_path, kwargs)
         if os.path.isdir(split_clip_path):
             # Get all folder names in the split_clip folder
@@ -110,10 +129,10 @@ class VBenchLong(VBench):
                 video_scenes_path = os.path.join(os.path.dirname(video_path), "split_scene", video_name)
                 for video_scene_path in sorted(os.listdir(video_scenes_path)):
                     video_scene_path = os.path.join(video_scenes_path, video_scene_path)
-                    split_tasks.append((video_scene_path, base_output_dir, int(duration)))
+                    split_tasks.append((video_scene_path, base_output_dir, int(duration), truncate_seconds))
 
             else:
-                split_tasks.append((video_path, base_output_dir, int(duration)))
+                split_tasks.append((video_path, base_output_dir, int(duration), truncate_seconds))
 
         split_workers = _resolve_split_workers(kwargs)
         total_tasks = len(split_tasks)
