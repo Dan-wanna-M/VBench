@@ -86,7 +86,7 @@ def color(model, video_dict, device):
                     'video_path': video_path, 
                     'video_results': cur_success_frame_rate,
                     'cur_success_frame_rate': cur_success_frame_rate,})
-    success_rate = success_frame_count_all / video_count
+    success_rate = success_frame_count_all / video_count if video_count > 0 else 0.0
     return success_rate, video_results
         
 
@@ -101,5 +101,5 @@ def compute_color(json_dir, device, submodules_dict, **kwargs):
         video_results = gather_list_of_dict(video_results)
         success_frame_count = sum([x['cur_success_frame_rate'] for x in video_results])
         frame_count = len(video_results)
-        all_results = success_frame_count / frame_count
+        all_results = success_frame_count / frame_count if frame_count > 0 else 0.0
     return all_results, video_results
